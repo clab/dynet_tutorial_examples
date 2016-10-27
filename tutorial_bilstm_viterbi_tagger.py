@@ -269,5 +269,7 @@ for ITER in xrange(50):
         num_tagged += len(golds)
         loss_exp.backward()
         trainer.update()
+    print "epoch %r finished" % ITER
+    trainer.update_epoch(1.0)
 
 
