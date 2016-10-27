@@ -12,6 +12,7 @@ test_file="WSJ_DEV"
 
 MAX_LIK_ITERS = 1
 SMALL_NUMBER = -1e10
+MARGIN = 1
 
 class Vocab:
     def __init__(self, w2i=None):
@@ -154,7 +155,7 @@ def build_tagging_graph(words):
 
     return exps
 
-def viterbi_decoding(log_vecs):
+def viterbi_decoding(log_vecs, gold_tags = []):
     # Initialize
     init_prob = [SMALL_NUMBER] * ntags
     init_prob[S_T] = 0
@@ -172,6 +173,10 @@ def viterbi_decoding(log_vecs):
             my_best_ids.append(my_best_id)
             my_best_exprs.append(dy.pick(next_single_expr, my_best_id))
         for_expr = dy.concatenate(my_best_exprs) + vec
+        if MARGIN != 0 and len(gold_tags) != 0:
+            adjust = [MARGIN] * ntags
+            adjust[vt.w2i[gold_tags[i]]] = 0
+            for_expr = for_expr + dy.inputVector(adjust)
         best_ids.append(my_best_ids)
     # Perform the final step to the sentence terminal symbol
     next_single_expr = for_expr + trans_exprs[S_T]
@@ -185,7 +190,6 @@ def viterbi_decoding(log_vecs):
         best_path.append(vt.i2w[my_best_id])
     best_path.pop()
     best_path.reverse()
-    # best_path = best_path[:-1]
     # Return the best path and best score as an expression
     return best_path, best_expr
 
@@ -204,12 +208,9 @@ def forced_decoding(log_vecs, tags):
 def viterbi_sent_loss(words, tags):
     vecs = build_tagging_graph(words)
     log_vecs = [dy.log_softmax(vec) for vec in vecs]
-    viterbi_tags, viterbi_score = viterbi_decoding(log_vecs)
+    viterbi_tags, viterbi_score = viterbi_decoding(log_vecs, tags)
     if viterbi_tags != tags:
         reference_score = forced_decoding(log_vecs, tags)
-        if reference_score.npvalue() > viterbi_score.npvalue():
-            print "SEARCH ERROR"    
-            sys.exit(1)
         return viterbi_score - reference_score
     else:
         return dy.scalarInput(0)
