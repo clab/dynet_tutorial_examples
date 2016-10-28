@@ -7,8 +7,8 @@ import dynet as dy
 import numpy as np
 
 # format of files: each line is "word1/tag2 word2/tag2 ..."
-train_file="WSJ_TRAIN"
-test_file="WSJ_DEV"
+train_file="CONLL_TRAIN"
+test_file="CONLL_TESTA"
 
 MAX_LIK_ITERS = 1
 SMALL_NUMBER = -1e10
@@ -231,7 +231,7 @@ for ITER in xrange(50):
             print cum_loss / num_tagged
             cum_loss = 0
             num_tagged = 0
-        if i % 10000 == 0:
+        if i % 10000 == 0 or i == len(train)-1: 
             good = bad = 0.0
             for sent in test:
                 words = [w for w,t in sent]
