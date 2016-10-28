@@ -67,18 +67,6 @@ nwords = vw.size()
 ntags  = vt.size()
 nchars  = vc.size()
 
-# Precalculate the log probabilities of P(x_t|x_[t-1]) for each x_t
-trans_counts = defaultdict(lambda: 0)
-ctxt_counts = defaultdict(lambda: 0)
-for s in train:
-    tags = list(chain([S_T], [vt.w2i[t] for w,t in s], [S_T]))
-    for t_prev, t_curr in zip(tags, tags[1:]):
-        ctxt_counts[t_prev] += 1
-        trans_counts[t_prev,t_curr] += 1
-trans_vecs = [[SMALL_NUMBER] * ntags for i in range(ntags)]
-for (t_prev,t_curr),v in trans_counts.items():
-    trans_vecs[t_curr][t_prev] = math.log(v/float(ctxt_counts[t_prev]))
-
 # DyNet Starts
 
 model = dy.Model()
@@ -86,6 +74,7 @@ trainer = dy.AdamTrainer(model)
 
 WORDS_LOOKUP = model.add_lookup_parameters((nwords, 128))
 CHARS_LOOKUP = model.add_lookup_parameters((nchars, 20))
+TRANS_LOOKUP = model.add_lookup_parameters((ntags, ntags))
 p_t1  = model.add_lookup_parameters((ntags, 30))
 
 # MLP on top of biLSTM outputs 100 -> 32 -> ntags
@@ -155,15 +144,15 @@ def build_tagging_graph(words):
 
     return exps
 
-def viterbi_decoding(log_vecs, gold_tags = []):
+def viterbi_decoding(vecs, gold_tags = []):
     # Initialize
     init_prob = [SMALL_NUMBER] * ntags
     init_prob[S_T] = 0
     for_expr = dy.inputVector(init_prob)
     best_ids = []
-    trans_exprs = [dy.inputVector(vec) for vec in trans_vecs]
+    trans_exprs = [TRANS_LOOKUP[tid] for tid in range(ntags)]
     # Perform the forward pass through the sentence
-    for i, vec in enumerate(log_vecs):
+    for i, vec in enumerate(vecs):
         my_best_ids = []
         my_best_exprs = []
         for next_tag in range(ntags):
@@ -193,24 +182,23 @@ def viterbi_decoding(log_vecs, gold_tags = []):
     # Return the best path and best score as an expression
     return best_path, best_expr
 
-def forced_decoding(log_vecs, tags):
+def forced_decoding(vecs, tags):
     # Initialize
     for_expr = dy.scalarInput(0)
     for_tag = S_T
     # Perform the forward pass through the sentence
-    for i, vec in enumerate(log_vecs): 
+    for i, vec in enumerate(vecs): 
         my_tag = vt.w2i[tags[i]]
-        for_expr = for_expr + dy.scalarInput(trans_vecs[my_tag][for_tag]) + vec[my_tag]
+        for_expr = for_expr + dy.pick(TRANS_LOOKUP[my_tag], for_tag) + vec[my_tag]
         for_tag = my_tag
-    for_expr = for_expr + trans_vecs[S_T][for_tag]
+    for_expr = for_expr + dy.pick(TRANS_LOOKUP[S_T], for_tag)
     return for_expr
 
 def viterbi_sent_loss(words, tags):
     vecs = build_tagging_graph(words)
-    log_vecs = [dy.log_softmax(vec) for vec in vecs]
-    viterbi_tags, viterbi_score = viterbi_decoding(log_vecs, tags)
+    viterbi_tags, viterbi_score = viterbi_decoding(vecs, tags)
     if viterbi_tags != tags:
-        reference_score = forced_decoding(log_vecs, tags)
+        reference_score = forced_decoding(vecs, tags)
         return viterbi_score - reference_score
     else:
         return dy.scalarInput(0)
@@ -252,8 +240,7 @@ for ITER in xrange(50):
                     tags = tag_sent(words)
                 else:
                     vecs = build_tagging_graph(words)
-                    log_vecs = [dy.log_softmax(vec) for vec in vecs]
-                    tags, loss_exp = viterbi_decoding(log_vecs)
+                    tags, loss_exp = viterbi_decoding(vecs)
                 for go,gu in zip(golds,tags):
                     if go == gu: good +=1
                     else: bad+=1
