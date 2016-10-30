@@ -9,7 +9,7 @@ import numpy as np
 train_file="CHAR_TRAIN"
 test_file="CHAR_DEV"
 
-MINIBATCH_SIZE = 50
+MINIBATCH_SIZE = 10
 
 class Vocab:
     def __init__(self, w2i=None):
@@ -92,8 +92,10 @@ def calc_lm_loss(sents):
     for wid, mask in zip(wids, masks):
         score = W_exp * s.output() + b_exp
         loss = dy.pickneglogsoftmax_batch(score, wid)
-        if mask[-1] != 1:
-            mask_expr = 0
+        # TODO: Masking is pending a good python interface
+        # if mask[-1] != 1:
+        #     mask_expr = dy.input(mask, Dim((1,), len(sents)))
+        #     loss = loss * mask_expr
         losses.append(loss)
         wemb = dy.lookup_batch(WORDS_LOOKUP, wid)
         s = s.add_input(wemb) 
