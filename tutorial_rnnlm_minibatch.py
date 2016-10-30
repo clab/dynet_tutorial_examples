@@ -9,7 +9,7 @@ import numpy as np
 train_file="CHAR_TRAIN"
 test_file="CHAR_DEV"
 
-MINIBATCH_SIZE = 10
+MB_SIZE = 10
 
 class Vocab:
     def __init__(self, w2i=None):
@@ -55,14 +55,15 @@ nwords = vw.size()
 model = dy.Model()
 trainer = dy.AdamTrainer(model)
 
+# Lookup parameters for word embeddings
 WORDS_LOOKUP = model.add_lookup_parameters((nwords, 64))
 
-# Softmax on top of LSTM outputs
+# Word-level LSTM (layers=1, input=64, output=128, model)
+RNN = dy.LSTMBuilder(1, 64, 128, model)
+
+# Softmax weights/biases on top of LSTM outputs
 W_sm = model.add_parameters((nwords, 128))
 b_sm = model.add_parameters(nwords)
-
-# word-level LSTM
-RNN = dy.LSTMBuilder(1, 64, 128, model) # layers, in-dim, out-dim, model
 
 # Build the language model graph
 def calc_lm_loss(sents):
@@ -80,23 +81,29 @@ def calc_lm_loss(sents):
     wids = []
     masks = []
     for i in range(len(sents[0])):
-        wids.append([(vw.w2i[sent[i]] if len(sent)>i else S) for sent in sents])
+        wids.append([
+          (vw.w2i[sent[i]] if len(sent)>i else S) for sent in sents])
         mask = [(1 if len(sent)>i else 0) for sent in sents]
         masks.append(mask)
         tot_words += sum(mask)
-
-    # feed word vectors into the LSTM and predict the next word
+    
+    # start the rnn by inputting "<s>"
     init_ids = [S] * len(sents)
-    s = f_init.add_input(dy.lookup_batch(WORDS_LOOKUP,init_ids)) # Start the rnn by inputting "<s>"
+    s = f_init.add_input(dy.lookup_batch(WORDS_LOOKUP,init_ids))
+
+    # feed word vectors into the RNN and predict the next word    
     losses = []
     for wid, mask in zip(wids, masks):
+        # calculate the softmax and loss      
         score = W_exp * s.output() + b_exp
         loss = dy.pickneglogsoftmax_batch(score, wid)
-        # TODO: Masking is pending a good python interface
-        # if mask[-1] != 1:
-        #     mask_expr = dy.input(mask, Dim((1,), len(sents)))
-        #     loss = loss * mask_expr
+        # mask the loss if at least one sentence is shorter
+        if mask[-1] != 1:
+            mask_expr = dy.inputVector(mask)
+            mask_expr = dy.reshape(mask_expr, (1,), MB_SIZE)
+            loss = loss * mask_expr
         losses.append(loss)
+        # update the state of the RNN        
         wemb = dy.lookup_batch(WORDS_LOOKUP, wid)
         s = s.add_input(wemb) 
     
@@ -106,24 +113,25 @@ num_tagged = cum_loss = 0
 # Sort training sentences in descending order and count minibatches
 train.sort(key=lambda x: -len(x))
 test.sort(key=lambda x: -len(x))
-order = range(len(train)/MINIBATCH_SIZE + 1)
+train_order = [x*MB_SIZE for x in range(len(train)/MB_SIZE + 1)]
+test_order = [x*MB_SIZE for x in range(len(test)/MB_SIZE + 1)]
 # Perform training
 for ITER in xrange(50):
-    random.shuffle(order)
-    for i,sid in enumerate(order,1): 
-        if i % (500/MINIBATCH_SIZE) == 0:
+    random.shuffle(train_order)
+    for i,sid in enumerate(train_order,1): 
+        if i % (500/MB_SIZE) == 0:
             trainer.status()
             print cum_loss / num_tagged
             num_tagged = cum_loss = 0
-        if i % (10000/MINIBATCH_SIZE) == 0 or i == len(order)-1:
+        if i % (10000/MB_SIZE) == 0 or i == len(train_order)-1:
             dev_loss = dev_words = 0
-            for sid in range(len(train)/MINIBATCH_SIZE + 1):
-                loss_exp, mb_words = calc_lm_loss(test[sid:sid+MINIBATCH_SIZE])
+            for sid in test_order:
+                loss_exp, mb_words = calc_lm_loss(test[sid:sid+MB_SIZE])
                 dev_loss += loss_exp.scalar_value()
                 dev_words += mb_words
             print dev_loss / dev_words
-        # train on sent
-        loss_exp, mb_words = calc_lm_loss(train[sid:sid+MINIBATCH_SIZE])
+        # train on the minibatch
+        loss_exp, mb_words = calc_lm_loss(train[sid:sid+MB_SIZE])
         cum_loss += loss_exp.scalar_value()
         num_tagged += mb_words
         loss_exp.backward()

@@ -74,20 +74,21 @@ def calc_lm_loss(sent):
     # initialize the RNN
     f_init = RNN.initial_state()
 
-    # get the word vectors. word_rep(...) returns a 64-dim vector expression for each word.
+    # get the word ids
     wids = [vw.w2i[w] for w in sent]
-    wembs = [WORDS_LOOKUP[wid] for wid in wids]
 
     # start the rnn by inputting "<s>"
     s = f_init.add_input(wembs[-1]) 
 
-    # feed word vectors into the LSTM and predict the next word
+    # feed word vectors into the RNN and predict the next word
     losses = []
-    for wid, we in zip(wids, wembs):
+    for wid in wids:
+        # calculate the softmax and loss
         score = W_exp * s.output() + b_exp
         loss = dy.pickneglogsoftmax(score, wid)
         losses.append(loss)
-        s = s.add_input(we) 
+        # update the state of the RNN
+        s = s.add_input(WORDS_LOOKUP[wid]) 
     
     return dy.esum(losses)
 
