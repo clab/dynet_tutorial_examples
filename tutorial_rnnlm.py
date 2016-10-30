@@ -53,14 +53,15 @@ nwords = vw.size()
 model = dy.Model()
 trainer = dy.AdamTrainer(model)
 
+# Lookup parameters for word embeddings
 WORDS_LOOKUP = model.add_lookup_parameters((nwords, 64))
 
-# Softmax on top of LSTM outputs
+# Word-level LSTM (layers=1, input=64, output=128, model)
+RNN = dy.LSTMBuilder(1, 64, 128, model)
+
+# Softmax weights/biases on top of LSTM outputs
 W_sm = model.add_parameters((nwords, 128))
 b_sm = model.add_parameters(nwords)
-
-# word-level LSTM
-RNN = dy.LSTMBuilder(1, 64, 128, model) # layers, in-dim, out-dim, model
 
 # Build the language model graph
 def calc_lm_loss(sent):
@@ -77,8 +78,10 @@ def calc_lm_loss(sent):
     wids = [vw.w2i[w] for w in sent]
     wembs = [WORDS_LOOKUP[wid] for wid in wids]
 
+    # start the rnn by inputting "<s>"
+    s = f_init.add_input(wembs[-1]) 
+
     # feed word vectors into the LSTM and predict the next word
-    s = f_init.add_input(wembs[-1]) # Start the rnn by inputting "<s>"
     losses = []
     for wid, we in zip(wids, wembs):
         score = W_exp * s.output() + b_exp
