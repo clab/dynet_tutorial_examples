@@ -6,8 +6,8 @@ import dynet as dy
 import numpy as np
 
 # format of files: each line is "word1/tag2 word2/tag2 ..."
-train_file="CONLL_TRAIN"
-test_file="CONLL_TESTA"
+train_file="WSJ_TRAIN"
+test_file="WSJ_DEV"
 
 class Vocab:
     def __init__(self, w2i=None):

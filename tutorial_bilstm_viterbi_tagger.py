@@ -7,10 +7,10 @@ import dynet as dy
 import numpy as np
 
 # format of files: each line is "word1/tag2 word2/tag2 ..."
-train_file="CONLL_TRAIN"
-test_file="CONLL_TESTA"
+train_file="WSJ_TRAIN"
+test_file="WSJ_DEV"
 
-MAX_LIK_ITERS = 1
+MAX_LIK_ITERS = 3
 SMALL_NUMBER = -1e10
 MARGIN = 1
 
@@ -156,28 +156,33 @@ def viterbi_decoding(vecs, gold_tags = []):
         my_best_ids = []
         my_best_exprs = []
         for next_tag in range(ntags):
+            # Calculate vector for single next tag
             next_single_expr = for_expr + trans_exprs[next_tag]
             next_single = next_single_expr.npvalue()
+            # Find and save the best score
             my_best_id = np.argmax(next_single)
             my_best_ids.append(my_best_id)
             my_best_exprs.append(dy.pick(next_single_expr, my_best_id))
+        # Concatenate the scores for all vectors together
         for_expr = dy.concatenate(my_best_exprs) + vec
+        # Give a bonus to all but the correct tag if using margin
         if MARGIN != 0 and len(gold_tags) != 0:
             adjust = [MARGIN] * ntags
             adjust[vt.w2i[gold_tags[i]]] = 0
             for_expr = for_expr + dy.inputVector(adjust)
+        # Save the best ids
         best_ids.append(my_best_ids)
     # Perform the final step to the sentence terminal symbol
     next_single_expr = for_expr + trans_exprs[S_T]
     next_single = next_single_expr.npvalue()
     my_best_id = np.argmax(next_single)
     best_expr = dy.pick(next_single_expr, my_best_id)
-    # Perform the reverse pass without the unnecessary final _S_
+    # Perform the reverse pass
     best_path = [vt.i2w[my_best_id]]
     for my_best_ids in reversed(best_ids):
         my_best_id = my_best_ids[my_best_id]
         best_path.append(vt.i2w[my_best_id])
-    best_path.pop()
+    best_path.pop() # Remove final <s>
     best_path.reverse()
     # Return the best path and best score as an expression
     return best_path, best_expr
