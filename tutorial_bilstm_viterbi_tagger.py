@@ -1,6 +1,7 @@
 from collections import Counter, defaultdict
-from itertools import count
+from itertools import count, chain
 import random
+import math
 
 import dynet as dy
 import numpy as np
@@ -8,6 +9,10 @@ import numpy as np
 # format of files: each line is "word1/tag2 word2/tag2 ..."
 train_file="CONLL_TRAIN"
 test_file="CONLL_TESTA"
+
+MAX_LIK_ITERS = 1
+SMALL_NUMBER = -1e10
+MARGIN = 1
 
 class Vocab:
     def __init__(self, w2i=None):
@@ -35,7 +40,7 @@ def read(fname):
             yield sent
 
 train=list(read(train_file))
-dev=list(read(dev_file))
+test=list(read(test_file))
 words=[]
 tags=[]
 chars=set()
@@ -47,12 +52,16 @@ for sent in train:
         chars.update(w)
         wc[w]+=1
 words.append("_UNK_")
+words.append("_S_")
+tags.append("_S_")
 chars.add("<*>")
 
-vw = Vocab.from_corpus([words]) 
+vw = Vocab.from_corpus([words]) # TODO Vocab
 vt = Vocab.from_corpus([tags])
 vc = Vocab.from_corpus([chars])
 UNK = vw.w2i["_UNK_"]
+S_W = vw.w2i["_S_"]
+S_T = vt.w2i["_S_"]
 
 nwords = vw.size()
 ntags  = vt.size()
@@ -65,6 +74,7 @@ trainer = dy.AdamTrainer(model)
 
 WORDS_LOOKUP = model.add_lookup_parameters((nwords, 128))
 CHARS_LOOKUP = model.add_lookup_parameters((nchars, 20))
+TRANS_LOOKUP = model.add_lookup_parameters((ntags, ntags))
 p_t1  = model.add_lookup_parameters((ntags, 30))
 
 # MLP on top of biLSTM outputs 100 -> 32 -> ntags
@@ -128,11 +138,70 @@ def build_tagging_graph(words):
 
     # feed each biLSTM state to an MLP
     exps = []
-    for x in bi_exps:
-        r_t = O*(dy.tanh(H * x))
+    for bi in bi_exps:
+        r_t = O*(dy.tanh(H * bi))
         exps.append(r_t)
 
     return exps
+
+def viterbi_decoding(vecs, gold_tags = []):
+    # Initialize
+    init_prob = [SMALL_NUMBER] * ntags
+    init_prob[S_T] = 0
+    for_expr = dy.inputVector(init_prob)
+    best_ids = []
+    trans_exprs = [TRANS_LOOKUP[tid] for tid in range(ntags)]
+    # Perform the forward pass through the sentence
+    for i, vec in enumerate(vecs):
+        my_best_ids = []
+        my_best_exprs = []
+        for next_tag in range(ntags):
+            next_single_expr = for_expr + trans_exprs[next_tag]
+            next_single = next_single_expr.npvalue()
+            my_best_id = np.argmax(next_single)
+            my_best_ids.append(my_best_id)
+            my_best_exprs.append(dy.pick(next_single_expr, my_best_id))
+        for_expr = dy.concatenate(my_best_exprs) + vec
+        if MARGIN != 0 and len(gold_tags) != 0:
+            adjust = [MARGIN] * ntags
+            adjust[vt.w2i[gold_tags[i]]] = 0
+            for_expr = for_expr + dy.inputVector(adjust)
+        best_ids.append(my_best_ids)
+    # Perform the final step to the sentence terminal symbol
+    next_single_expr = for_expr + trans_exprs[S_T]
+    next_single = next_single_expr.npvalue()
+    my_best_id = np.argmax(next_single)
+    best_expr = dy.pick(next_single_expr, my_best_id)
+    # Perform the reverse pass without the unnecessary final _S_
+    best_path = [vt.i2w[my_best_id]]
+    for my_best_ids in reversed(best_ids):
+        my_best_id = my_best_ids[my_best_id]
+        best_path.append(vt.i2w[my_best_id])
+    best_path.pop()
+    best_path.reverse()
+    # Return the best path and best score as an expression
+    return best_path, best_expr
+
+def forced_decoding(vecs, tags):
+    # Initialize
+    for_expr = dy.scalarInput(0)
+    for_tag = S_T
+    # Perform the forward pass through the sentence
+    for i, vec in enumerate(vecs): 
+        my_tag = vt.w2i[tags[i]]
+        for_expr = for_expr + dy.pick(TRANS_LOOKUP[my_tag], for_tag) + vec[my_tag]
+        for_tag = my_tag
+    for_expr = for_expr + dy.pick(TRANS_LOOKUP[S_T], for_tag)
+    return for_expr
+
+def viterbi_sent_loss(words, tags):
+    vecs = build_tagging_graph(words)
+    viterbi_tags, viterbi_score = viterbi_decoding(vecs, tags)
+    if viterbi_tags != tags:
+        reference_score = forced_decoding(vecs, tags)
+        return viterbi_score - reference_score
+    else:
+        return dy.scalarInput(0)
 
 def sent_loss(words, tags):
     vecs = build_tagging_graph(words)
@@ -151,22 +220,27 @@ def tag_sent(words):
     for prb in probs:
         tag = np.argmax(prb)
         tags.append(vt.i2w[tag])
-    return zip(words, tags)
+    return tags
 
 num_tagged = cum_loss = 0
 for ITER in xrange(50):
     random.shuffle(train)
     for i,s in enumerate(train,1):
-        if i > 0 and i % 500 == 0:   # print status
+        if i % 500 == 0:
             trainer.status()
             print cum_loss / num_tagged
-            cum_loss = num_tagged = 0
-        if i % 10000 == 0 or i == len(train)-1: # eval on dev
+            cum_loss = 0
+            num_tagged = 0
+        if i % 10000 == 0 or i == len(train)-1: 
             good = bad = 0.0
-            for sent in dev:
+            for sent in test:
                 words = [w for w,t in sent]
                 golds = [t for w,t in sent]
-                tags = [t for w,t in tag_sent(words)]
+                if ITER < MAX_LIK_ITERS:
+                    tags = tag_sent(words)
+                else:
+                    vecs = build_tagging_graph(words)
+                    tags, loss_exp = viterbi_decoding(vecs)
                 for go,gu in zip(golds,tags):
                     if go == gu: good +=1
                     else: bad+=1
@@ -175,7 +249,10 @@ for ITER in xrange(50):
         words = [w for w,t in s]
         golds = [t for w,t in s]
 
-        loss_exp =  sent_loss(words, golds)
+        if ITER < MAX_LIK_ITERS:
+            loss_exp =  sent_loss(words, golds)
+        else:
+            loss_exp =  viterbi_sent_loss(words, golds)
         cum_loss += loss_exp.scalar_value()
         num_tagged += len(golds)
         loss_exp.backward()
