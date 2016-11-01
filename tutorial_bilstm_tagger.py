@@ -7,7 +7,7 @@ import numpy as np
 
 # format of files: each line is "word1/tag2 word2/tag2 ..."
 train_file="WSJ_TRAIN"
-test_file="WSJ_DEV"
+dev_file="WSJ_DEV"
 
 class Vocab:
     def __init__(self, w2i=None):
@@ -35,7 +35,7 @@ def read(fname):
             yield sent
 
 train=list(read(train_file))
-test=list(read(test_file))
+dev=list(read(dev_file))
 words=[]
 tags=[]
 chars=set()
@@ -49,7 +49,7 @@ for sent in train:
 words.append("_UNK_")
 chars.add("<*>")
 
-vw = Vocab.from_corpus([words]) # TODO Vocab
+vw = Vocab.from_corpus([words]) 
 vt = Vocab.from_corpus([tags])
 vc = Vocab.from_corpus([chars])
 UNK = vw.w2i["_UNK_"]
@@ -128,8 +128,8 @@ def build_tagging_graph(words):
 
     # feed each biLSTM state to an MLP
     exps = []
-    for bi in bi_exps:
-        r_t = O*(dy.tanh(H * bi))
+    for x in bi_exps:
+        r_t = O*(dy.tanh(H * x))
         exps.append(r_t)
 
     return exps
@@ -157,14 +157,13 @@ num_tagged = cum_loss = 0
 for ITER in xrange(50):
     random.shuffle(train)
     for i,s in enumerate(train,1):
-        if i % 500 == 0:
+        if i > 0 and i % 500 == 0:   # print status
             trainer.status()
             print cum_loss / num_tagged
-            cum_loss = 0
-            num_tagged = 0
-        if i % 10000 == 0:
+            cum_loss = num_tagged = 0
+        if i % 10000 == 0:           # eval on dev
             good = bad = 0.0
-            for sent in test:
+            for sent in dev:
                 words = [w for w,t in sent]
                 golds = [t for w,t in sent]
                 tags = [t for w,t in tag_sent(words)]
