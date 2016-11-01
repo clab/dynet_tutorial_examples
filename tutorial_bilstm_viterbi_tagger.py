@@ -12,7 +12,7 @@ test_file="WSJ_DEV"
 
 MAX_LIK_ITERS = 3
 SMALL_NUMBER = -1e10
-MARGIN = 1
+MARGIN = 0
 
 class Vocab:
     def __init__(self, w2i=None):
@@ -237,7 +237,7 @@ for ITER in xrange(50):
             cum_loss = 0
             num_tagged = 0
         if i % 10000 == 0 or i == len(train)-1: 
-            good = bad = 0.0
+            good_sent = bad_sent = good = bad = 0.0
             for sent in test:
                 words = [w for w,t in sent]
                 golds = [t for w,t in sent]
@@ -246,10 +246,12 @@ for ITER in xrange(50):
                 else:
                     vecs = build_tagging_graph(words)
                     tags, loss_exp = viterbi_decoding(vecs)
+                if tags == golds: good_sent += 1
+                else: bad_sent += 1
                 for go,gu in zip(golds,tags):
-                    if go == gu: good +=1
-                    else: bad+=1
-            print good/(good+bad)
+                    if go == gu: good += 1
+                    else: bad += 1
+            print good/(good+bad), good_sent/(good_sent+bad_sent)
         # train on sent
         words = [w for w,t in s]
         golds = [t for w,t in s]
