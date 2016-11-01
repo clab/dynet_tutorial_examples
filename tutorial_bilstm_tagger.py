@@ -7,7 +7,7 @@ import numpy as np
 
 # format of files: each line is "word1/tag2 word2/tag2 ..."
 train_file="WSJ_TRAIN"
-test_file="WSJ_DEV"
+dev_file="WSJ_DEV"
 
 class Vocab:
     def __init__(self, w2i=None):
