@@ -78,7 +78,7 @@ def calc_lm_loss(sent):
     wids = [vw.w2i[w] for w in sent]
 
     # start the rnn by inputting "<s>"
-    s = f_init.add_input(wembs[-1]) 
+    s = f_init.add_input(WORDS_LOOKUP[wids[-1]]) 
 
     # feed word vectors into the RNN and predict the next word
     losses = []
