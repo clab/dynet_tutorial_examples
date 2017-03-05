@@ -113,8 +113,8 @@ num_tagged = cum_loss = 0
 # Sort training sentences in descending order and count minibatches
 train.sort(key=lambda x: -len(x))
 test.sort(key=lambda x: -len(x))
-train_order = [x*MB_SIZE for x in range(len(train)/MB_SIZE + 1)]
-test_order = [x*MB_SIZE for x in range(len(test)/MB_SIZE + 1)]
+train_order = [x*MB_SIZE for x in range(len(train)/MB_SIZE)]
+test_order = [x*MB_SIZE for x in range(len(test)/MB_SIZE)]
 # Perform training
 for ITER in xrange(50):
     random.shuffle(train_order)
